@@ -15,13 +15,6 @@
  */
 package org.springframework.batch.sample.common;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.fail;
-
-import java.util.Arrays;
-
-import javax.sql.DataSource;
-
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.springframework.batch.core.JobExecution;
@@ -37,117 +30,114 @@ import org.springframework.test.context.transaction.AfterTransaction;
 import org.springframework.test.context.transaction.BeforeTransaction;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
-import org.springframework.transaction.TransactionStatus;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.transaction.support.TransactionCallback;
 import org.springframework.transaction.support.TransactionTemplate;
+
+import javax.sql.DataSource;
+import java.util.Arrays;
+
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.fail;
 
 @RunWith(SpringJUnit4ClassRunner.class)
 @ContextConfiguration()
 public class StagingItemReaderTests {
-	private JdbcOperations jdbcTemplate;
+    private JdbcOperations jdbcTemplate;
 
-	@Autowired
-	private PlatformTransactionManager transactionManager;
+    @Autowired
+    private PlatformTransactionManager transactionManager;
 
-	@Autowired
-	private StagingItemWriter<String> writer;
+    @Autowired
+    private StagingItemWriter<String> writer;
 
-	@Autowired
-	private StagingItemReader<String> reader;
+    @Autowired
+    private StagingItemReader<String> reader;
 
-	private Long jobId = 113L;
+    private Long jobId = 113L;
 
-	@Autowired
-	public void setDataSource(DataSource dataSource) {
-		this.jdbcTemplate = new JdbcTemplate(dataSource);
-	}
+    @Autowired
+    public void setDataSource(DataSource dataSource) {
+        this.jdbcTemplate = new JdbcTemplate(dataSource);
+    }
 
-	@BeforeTransaction
-	public void onSetUpBeforeTransaction() throws Exception {
-		StepExecution stepExecution = new StepExecution("stepName", new JobExecution(new JobInstance(jobId,
-				"testJob"), new JobParameters()));
-		writer.beforeStep(stepExecution);
-		writer.write(Arrays.asList("FOO", "BAR", "SPAM", "BUCKET"));
-		reader.beforeStep(stepExecution);
-	}
+    @BeforeTransaction
+    public void onSetUpBeforeTransaction() throws Exception {
+        StepExecution stepExecution = new StepExecution("stepName", new JobExecution(new JobInstance(jobId,
+                "testJob"), new JobParameters()));
+        writer.beforeStep(stepExecution);
+        writer.write(Arrays.asList("FOO", "BAR", "SPAM", "BUCKET"));
+        reader.beforeStep(stepExecution);
+    }
 
-	@AfterTransaction
-	public void onTearDownAfterTransaction() throws Exception {
-		reader.destroy();
-		jdbcTemplate.update("DELETE FROM BATCH_STAGING");
-	}
+    @AfterTransaction
+    public void onTearDownAfterTransaction() throws Exception {
+        reader.destroy();
+        jdbcTemplate.update("DELETE FROM BATCH_STAGING");
+    }
 
-	@Transactional
-	@Test
-	public void testReaderWithProcessorUpdatesProcessIndicator() throws Exception {
-		long id = jdbcTemplate.queryForObject("SELECT MIN(ID) from BATCH_STAGING where JOB_ID=?", Long.class, jobId);
-		String before = jdbcTemplate.queryForObject("SELECT PROCESSED from BATCH_STAGING where ID=?",
-				String.class, id);
-		assertEquals(StagingItemWriter.NEW, before);
+    @Transactional
+    @Test
+    public void testReaderWithProcessorUpdatesProcessIndicator() throws Exception {
+        long id = jdbcTemplate.queryForObject("SELECT MIN(ID) from BATCH_STAGING where JOB_ID=?", Long.class, jobId);
+        String before = jdbcTemplate.queryForObject("SELECT PROCESSED from BATCH_STAGING where ID=?",
+                String.class, id);
+        assertEquals(StagingItemWriter.NEW, before);
 
-		ProcessIndicatorItemWrapper<String> wrapper = reader.read();
-		String item = wrapper.getItem();
-		assertEquals("FOO", item);
+        ProcessIndicatorItemWrapper<String> wrapper = reader.read();
+        String item = wrapper.getItem();
+        assertEquals("FOO", item);
 
-		StagingItemProcessor<String> updater = new StagingItemProcessor<>();
-		updater.setJdbcTemplate(jdbcTemplate);
-		updater.process(wrapper);
+        StagingItemProcessor<String> updater = new StagingItemProcessor<>();
+        updater.setJdbcTemplate(jdbcTemplate);
+        updater.process(wrapper);
 
-		String after = jdbcTemplate.queryForObject("SELECT PROCESSED from BATCH_STAGING where ID=?",
-				String.class, id);
-		assertEquals(StagingItemWriter.DONE, after);
-	}
+        String after = jdbcTemplate.queryForObject("SELECT PROCESSED from BATCH_STAGING where ID=?",
+                String.class, id);
+        assertEquals(StagingItemWriter.DONE, after);
+    }
 
-	@Transactional
-	@Test
-	public void testUpdateProcessIndicatorAfterCommit() throws Exception {
-		TransactionTemplate txTemplate = new TransactionTemplate(transactionManager);
-		txTemplate.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
-		txTemplate.execute(new TransactionCallback<Void>() {
-			@Override
-			public Void doInTransaction(TransactionStatus transactionStatus) {
-				try {
-					testReaderWithProcessorUpdatesProcessIndicator();
-				}
-				catch (Exception e) {
-					fail("Unexpected Exception: " + e);
-				}
-				return null;
-			}
-		});
-		long id = jdbcTemplate.queryForObject("SELECT MIN(ID) from BATCH_STAGING where JOB_ID=?", Long.class, jobId);
-		String before = jdbcTemplate.queryForObject("SELECT PROCESSED from BATCH_STAGING where ID=?",
-				String.class, id);
-		assertEquals(StagingItemWriter.DONE, before);
-	}
+    @Transactional
+    @Test
+    public void testUpdateProcessIndicatorAfterCommit() throws Exception {
+        TransactionTemplate txTemplate = new TransactionTemplate(transactionManager);
+        txTemplate.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+        txTemplate.execute((transactionStatus) -> {
+            {
+                try {
+                    testReaderWithProcessorUpdatesProcessIndicator();
+                } catch (Exception e) {
+                    fail("Unexpected Exception: " + e);
+                }
+                return null;
+            }
+        });
+        long id = jdbcTemplate.queryForObject("SELECT MIN(ID) from BATCH_STAGING where JOB_ID=?", Long.class, jobId);
+        String before = jdbcTemplate.queryForObject("SELECT PROCESSED from BATCH_STAGING where ID=?",
+                String.class, id);
+        assertEquals(StagingItemWriter.DONE, before);
+    }
 
-	@Transactional
-	@Test
-	public void testReaderRollsBackProcessIndicator() throws Exception {
-		TransactionTemplate txTemplate = new TransactionTemplate(transactionManager);
-		txTemplate.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+    @Transactional
+    @Test
+    public void testReaderRollsBackProcessIndicator() throws Exception {
+        TransactionTemplate txTemplate = new TransactionTemplate(transactionManager);
+        txTemplate.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
 
-		final Long idToUse = txTemplate.execute(new TransactionCallback<Long>() {
-			@Override
-			public Long doInTransaction(TransactionStatus transactionStatus) {
+        final Long idToUse = txTemplate.execute((transactionStatus) -> {
+            long id = jdbcTemplate.queryForObject("SELECT MIN(ID) from BATCH_STAGING where JOB_ID=?", Long.class, jobId);
+            String before = jdbcTemplate.queryForObject("SELECT PROCESSED from BATCH_STAGING where ID=?",
+                    String.class, id);
+            assertEquals(StagingItemWriter.NEW, before);
 
-				long id = jdbcTemplate.queryForObject("SELECT MIN(ID) from BATCH_STAGING where JOB_ID=?", Long.class, jobId);
-				String before = jdbcTemplate.queryForObject("SELECT PROCESSED from BATCH_STAGING where ID=?",
-						String.class, id);
-				assertEquals(StagingItemWriter.NEW, before);
+            ProcessIndicatorItemWrapper<String> wrapper = reader.read();
+            assertEquals("FOO", wrapper.getItem());
 
-				ProcessIndicatorItemWrapper<String> wrapper = reader.read();
-				assertEquals("FOO", wrapper.getItem());
+            transactionStatus.setRollbackOnly();
+            return id;
+        });
 
-				transactionStatus.setRollbackOnly();
-
-				return id;
-			}
-		});
-
-		String after = jdbcTemplate.queryForObject("SELECT PROCESSED from BATCH_STAGING where ID=?",
-				String.class, idToUse);
-		assertEquals(StagingItemWriter.NEW, after);
-	}
+        String after = jdbcTemplate.queryForObject("SELECT PROCESSED from BATCH_STAGING where ID=?",
+                String.class, idToUse);
+        assertEquals(StagingItemWriter.NEW, after);
+    }
 }
