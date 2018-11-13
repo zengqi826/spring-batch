@@ -115,13 +115,7 @@ InitializingBean, DisposableBean {
 		}
 		@SuppressWarnings("unchecked")
 		T result = (T) jdbcTemplate.queryForObject("SELECT VALUE FROM BATCH_STAGING WHERE ID=?",
-				new RowMapper<Object>() {
-			@Override
-			public Object mapRow(ResultSet rs, int rowNum) throws SQLException {
-				byte[] blob = rs.getBytes(1);
-				return SerializationUtils.deserialize(blob);
-			}
-		}, id);
+				(rs,rowNum)->SerializationUtils.deserialize(rs.getBytes(1)), id);
 
 		return new ProcessIndicatorItemWrapper<>(id, result);
 	}
